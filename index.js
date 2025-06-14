@@ -16,7 +16,7 @@ app.post('/webhook/orders', async (req, res) => {
   const orderTotal = parseFloat(order.total_price);
 
   // Fetch customer data
-  const customerRes = await axios.get(`https://${SHOPIFY_STORE}/admin/api/2023-10/customers/${customerId}.json`, {
+  const customerRes = await axios.get(`https://${SHOPIFY_STORE}/admin/api/2024-04/customers/${customerId}.json`, {
     headers: {
       'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN
     }
@@ -32,7 +32,7 @@ app.post('/webhook/orders', async (req, res) => {
   }
 
   // Get existing points metafield (optional, can overwrite instead)
-  const metafieldsRes = await axios.get(`https://${SHOPIFY_STORE}/admin/api/2023-10/customers/${customerId}/metafields.json`, {
+  const metafieldsRes = await axios.get(`https://${SHOPIFY_STORE}/admin/api/2024-04/customers/${customerId}/metafields.json`, {
     headers: {
       'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN
     }
@@ -52,7 +52,7 @@ app.post('/webhook/orders', async (req, res) => {
 
   // Update or create metafield
   if (pointsMetafieldId) {
-    await axios.put(`https://${SHOPIFY_STORE}/admin/api/2023-10/metafields/${pointsMetafieldId}.json`, {
+    await axios.put(`https://${SHOPIFY_STORE}/admin/api/2024-04/metafields/${pointsMetafieldId}.json`, {
       metafield: {
         value: newTotal,
         type: 'number_integer'
@@ -63,7 +63,7 @@ app.post('/webhook/orders', async (req, res) => {
       }
     });
   } else {
-    await axios.post(`https://${SHOPIFY_STORE}/admin/api/2023-10/customers/${customerId}/metafields.json`, {
+    await axios.post(`https://${SHOPIFY_STORE}/admin/api/2024-04/customers/${customerId}/metafields.json`, {
       metafield: {
         namespace: 'loyalty',
         key: 'points',
