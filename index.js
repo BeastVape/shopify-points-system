@@ -5,6 +5,7 @@ const app = express();
 
 const SHOPIFY_ACCESS_TOKEN = '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';
 const SHOPIFY_STORE = 'j0f9pj-rd.myshopify.com';
+const API_VERSION = '2024-04';
 
 app.use(bodyParser.json());
 
@@ -15,16 +16,17 @@ app.post('/webhook/orders', async (req, res) => {
   const customerId = order.customer.id;
   const orderTotal = parseFloat(order.total_price);
 
-  try {
-  const response = await axios.get(`https://${SHOPIFY_STORE}/admin/api/2024-04/customers/${customerId}.json`, {
+  let customerRes;
+
+try {
+  customerRes = await axios.get(`https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}.json`, {
     headers: {
       'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN
     }
   });
-  console.log("Customer data:", response.data);
 } catch (err) {
-  console.error("Axios error:", err.response?.status);
-  console.error("Error response:", err.response?.data);
+  console.error("Failed to fetch customer data:", err.response?.data);
+  return res.status(404).send("Customer not found");
 }
 
   const tags = customerRes.data.customer.tags.split(', ');
@@ -37,7 +39,7 @@ app.post('/webhook/orders', async (req, res) => {
   }
 
   // Get existing points metafield (optional, can overwrite instead)
-  const metafieldsRes = await axios.get(`https://${SHOPIFY_STORE}/admin/api/2024-04/customers/${customerId}/metafields.json`, {
+  const metafieldsRes = await axios.get(`https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}/metafields.json`, {
     headers: {
       'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN
     }
@@ -57,7 +59,7 @@ app.post('/webhook/orders', async (req, res) => {
 
   // Update or create metafield
   if (pointsMetafieldId) {
-    await axios.put(`https://${SHOPIFY_STORE}/admin/api/2024-04/metafields/${pointsMetafieldId}.json`, {
+    await axios.put(`https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/metafields/${pointsMetafieldId}.json`, {
       metafield: {
         value: newTotal,
         type: 'number_integer'
@@ -68,7 +70,7 @@ app.post('/webhook/orders', async (req, res) => {
       }
     });
   } else {
-    await axios.post(`https://${SHOPIFY_STORE}/admin/api/2024-04/customers/${customerId}/metafields.json`, {
+    await axios.post(`https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}/metafields.json`, {
       metafield: {
         namespace: 'loyalty',
         key: 'points',
