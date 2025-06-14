@@ -3,9 +3,9 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 const app = express();
 
-const SHOPIFY_API_KEY = 'your-admin-api-key';
-const SHOPIFY_ACCESS_TOKEN = 'your-admin-access-token';
-const SHOPIFY_STORE = 'your-store.myshopify.com';
+const SHOPIFY_API_KEY = '98f5fad5a095860c1abc825191c62520';
+const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
+const SHOPIFY_STORE = 'vapeonx.com';
 
 app.use(bodyParser.json());
 
@@ -27,7 +27,7 @@ app.post('/webhook/orders', async (req, res) => {
   if (!tags.includes('age_verified')) return res.status(200).send("Not verified");
 
   // Calculate points
-  let points = Math.floor(orderTotal / 50); // 1 point per ₱50
+  let points = Math.floor(orderTotal / 10);
   if (tags.find(tag => tag.startsWith('referrer-'))) {
     points += Math.floor(points * 0.05);
   }
