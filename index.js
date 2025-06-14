@@ -15,12 +15,17 @@ app.post('/webhook/orders', async (req, res) => {
   const customerId = order.customer.id;
   const orderTotal = parseFloat(order.total_price);
 
-  // Fetch customer data
-  const customerRes = await axios.get(`https://${SHOPIFY_STORE}/admin/api/2024-04/customers/${customerId}.json`, {
+  try {
+  const response = await axios.get(`https://${SHOPIFY_STORE}/admin/api/2024-04/customers/${customerId}.json`, {
     headers: {
       'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN
     }
   });
+  console.log("Customer data:", response.data);
+} catch (err) {
+  console.error("Axios error:", err.response?.status);
+  console.error("Error response:", err.response?.data);
+}
 
   const tags = customerRes.data.customer.tags.split(', ');
   if (!tags.includes('age_verified')) return res.status(200).send("Not verified");
