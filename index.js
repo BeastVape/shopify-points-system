@@ -3,9 +3,8 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 const app = express();
 
-const SHOPIFY_API_KEY = '98f5fad5a095860c1abc825191c62520';
-const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
-const SHOPIFY_STORE = 'vapeonx.com';
+const SHOPIFY_ACCESS_TOKEN = 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;
+const SHOPIFY_STORE = 'j0f9pj-rd.myshopify.com';
 
 app.use(bodyParser.json());
 
