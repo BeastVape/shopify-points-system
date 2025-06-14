@@ -27,7 +27,7 @@ app.post('/webhook/orders', async (req, res) => {
   if (!tags.includes('age_verified')) return res.status(200).send("Not verified");
 
   // Calculate points
-  let points = Math.floor(orderTotal / 10);
+  let points = Math.floor(orderTotal / 50); // 1 point per ₱50
   if (tags.find(tag => tag.startsWith('referrer-'))) {
     points += Math.floor(points * 0.05);
   }
