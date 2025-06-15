@@ -149,10 +149,10 @@ app.post('/webhook/customers/update', async (req, res) => {
   const note = customer.note || '';
 
   console.log("✅ customers/update webhook triggered");
-
+  console.log("Customer tags:", tags);
   if (!tags.includes('age_verified') || tags.includes('referral_rewarded')) {
-    return res.status(200).send("No action");
     console.log("Customer tags:", tags);
+    return res.status(200).send("No action");
   }
 
   const refMatch = note.match(/ref:(\d+)/);
