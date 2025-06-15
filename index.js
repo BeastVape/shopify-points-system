@@ -175,18 +175,53 @@ app.post('/webhook/customers/update', async (req, res) => {
   if (!refMatch) return res.status(200).send("No referral code found");
 
   const refCode = refMatch[1];
+  console.log("🔑 Referral code extracted:", refCode);
+
+  let referrer = null;
+  let page = 1;
+  const limit = 100;
 
   try {
-    const refSearch = await axios.get(
-      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/search.json?query=metafield:referral.code=${refCode}`,
-      {
-        headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
+    // 🌀 Manually loop through all customers to find one with matching referral code
+    while (!referrer) {
+      const resCustomers = await axios.get(
+        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers.json?limit=${limit}&page=${page}`,
+        {
+          headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
+        }
+      );
+
+      const customers = resCustomers.data.customers;
+      if (customers.length === 0) break;
+
+      for (const customer of customers) {
+        const metas = await axios.get(
+          `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customer.id}/metafields.json`,
+          {
+            headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
+          }
+        );
+
+        const match = metas.data.metafields.find(
+          mf => mf.namespace === 'referral' && mf.key === 'code' && mf.value === refCode
+        );
+
+        if (match) {
+          referrer = customer;
+          console.log("✅ Referrer found:", referrer.id, referrer.email);
+          break;
+        }
       }
-    );
 
-    const referrer = refSearch.data.customers?.[0];
-    if (!referrer) return res.status(200).send("Referrer not found");
+      page++;
+    }
 
+    if (!referrer) {
+      console.warn("⚠️ Referrer not found with code:", refCode);
+      return res.status(200).send("Referrer not found");
+    }
+
+    // 🔢 Get referrer's current points
     const refMetaRes = await axios.get(
       `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
       {
@@ -204,38 +239,55 @@ app.post('/webhook/customers/update', async (req, res) => {
     });
 
     const newPoints = currentPoints + 10;
+    console.log(`🎯 Updating referrer's points: ${currentPoints} ➜ ${newPoints}`);
 
     if (pointsId) {
-      await axios.put(`https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/metafields/${pointsId}.json`, {
-        metafield: { value: newPoints, type: 'number_integer' }
-      }, {
-        headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
-      });
-    } else {
-      await axios.post(`https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`, {
-        metafield: {
-          namespace: 'loyalty',
-          key: 'points',
-          value: newPoints,
-          type: 'number_integer'
+      await axios.put(
+        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/metafields/${pointsId}.json`,
+        {
+          metafield: {
+            value: newPoints,
+            type: 'number_integer'
+          }
+        },
+        {
+          headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
         }
-      }, {
-        headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
-      });
+      );
+    } else {
+      await axios.post(
+        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
+        {
+          metafield: {
+            namespace: 'loyalty',
+            key: 'points',
+            value: newPoints,
+            type: 'number_integer'
+          }
+        },
+        {
+          headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
+        }
+      );
     }
 
+    // 🏷️ Tag current customer as "referral_rewarded"
     const updatedTags = [...tags, 'referral_rewarded'];
-    await axios.put(`https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}.json`, {
-      customer: {
-        id: customerId,
-        tags: updatedTags.join(', ')
+    await axios.put(
+      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}.json`,
+      {
+        customer: {
+          id: customerId,
+          tags: updatedTags.join(', ')
+        }
+      },
+      {
+        headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
       }
-    }, {
-      headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
-    });
+    );
 
+    console.log("✅ Referral reward granted & customer tagged.");
     return res.status(200).send("Referral reward granted");
-
   } catch (err) {
     console.error("❌ Error in referral reward process:", err.response?.data || err.message);
     return res.status(500).send("Internal server error");
