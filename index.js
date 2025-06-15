@@ -152,6 +152,7 @@ app.post('/webhook/customers/update', async (req, res) => {
 
   if (!tags.includes('age_verified') || tags.includes('referral_rewarded')) {
     return res.status(200).send("No action");
+    console.log("Customer tags:", tags);
   }
 
   const refMatch = note.match(/ref:(\d+)/);
