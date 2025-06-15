@@ -139,39 +139,60 @@ app.post('/webhook/orders', async (req, res) => {
   return res.status(200).send("Points added and referral checked");
 });
 
-// ✅ New webhook for customer update (age_verified check)
 app.post('/webhook/customers/update', async (req, res) => {
-  const customer = req.body;
+  const webhookCustomer = req.body;
+  const customerId = webhookCustomer.id;
 
-  const customerId = customer.id;
-  const rawTags = customer.tags || ''; // ✅ fallback to empty string
-  const tags = rawTags.split(',').map(t => t.trim()).filter(Boolean); // ✅ safe split
-  const note = customer.note || '';
+  console.log("✅ customers/update webhook triggered for ID:", customerId);
 
-  console.log("✅ customers/update webhook triggered");
-  console.log("Customer tags:", tags);
+  let customerData;
+  try {
+    const customerRes = await axios.get(
+      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}.json`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN
+        }
+      }
+    );
+    customerData = customerRes.data.customer;
+  } catch (err) {
+    console.error("❌ Failed to fetch customer data:", err.response?.data || err.message);
+    return res.status(500).send("Failed to fetch customer data");
+  }
+
+  const tags = customerData.tags?.split(',').map(t => t.trim()) || [];
+  const note = customerData.note || '';
+
+  console.log("📌 Latest customer tags:", tags);
+  console.log("📌 Customer note:", note);
+
   if (!tags.includes('age_verified') || tags.includes('referral_rewarded')) {
-    console.log("Customer tags:", tags);
-    return res.status(200).send("No action");
+    return res.status(200).send("No action needed");
   }
 
   const refMatch = note.match(/ref:(\d+)/);
-  if (!refMatch) return res.status(200).send("No referral code");
+  if (!refMatch) return res.status(200).send("No referral code found");
 
   const refCode = refMatch[1];
 
   try {
     const refSearch = await axios.get(
       `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/search.json?query=metafield:referral.code=${refCode}`,
-      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+      {
+        headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
+      }
     );
 
     const referrer = refSearch.data.customers?.[0];
     if (!referrer) return res.status(200).send("Referrer not found");
 
-    const refMetaRes = await axios.get(`https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`, {
-      headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
-    });
+    const refMetaRes = await axios.get(
+      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
+      {
+        headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
+      }
+    );
 
     let currentPoints = 0;
     let pointsId = null;
@@ -203,11 +224,11 @@ app.post('/webhook/customers/update', async (req, res) => {
       });
     }
 
-    const newTags = [...tags, 'referral_rewarded'];
+    const updatedTags = [...tags, 'referral_rewarded'];
     await axios.put(`https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}.json`, {
       customer: {
         id: customerId,
-        tags: newTags.join(', ')
+        tags: updatedTags.join(', ')
       }
     }, {
       headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
@@ -216,7 +237,7 @@ app.post('/webhook/customers/update', async (req, res) => {
     return res.status(200).send("Referral reward granted");
 
   } catch (err) {
-    console.error("Error in customer update webhook:", err.response?.data || err.message);
+    console.error("❌ Error in referral reward process:", err.response?.data || err.message);
     return res.status(500).send("Internal server error");
   }
 });
