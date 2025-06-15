@@ -145,6 +145,8 @@ app.post('/webhook/customers/update', async (req, res) => {
   const customerId = customer.id;
   const tags = customer.tags.split(',').map(t => t.trim());
   const note = customer.note || '';
+  
+    console.log("✅ customers/update webhook triggered");
 
   if (!tags.includes('age_verified') || tags.includes('referral_rewarded')) {
     return res.status(200).send("No action");
