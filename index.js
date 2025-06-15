@@ -4,7 +4,7 @@ const axios = require('axios');
 const app = express();
 
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN || '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';
-const SHOPIFY_STORE        = 'your-store.myshopify.com';
+const SHOPIFY_STORE        = 'j0f9pj-rd.myshopify.com';
 const API_VERSION          = '2024-04';
 
 app.use(bodyParser.json());
