@@ -142,11 +142,13 @@ app.post('/webhook/orders', async (req, res) => {
 // ✅ New webhook for customer update (age_verified check)
 app.post('/webhook/customers/update', async (req, res) => {
   const customer = req.body;
+
   const customerId = customer.id;
-  const tags = customer.tags.split(',').map(t => t.trim());
+  const rawTags = customer.tags || ''; // ✅ fallback to empty string
+  const tags = rawTags.split(',').map(t => t.trim()).filter(Boolean); // ✅ safe split
   const note = customer.note || '';
-  
-    console.log("✅ customers/update webhook triggered");
+
+  console.log("✅ customers/update webhook triggered");
 
   if (!tags.includes('age_verified') || tags.includes('referral_rewarded')) {
     return res.status(200).send("No action");
@@ -217,6 +219,8 @@ app.post('/webhook/customers/update', async (req, res) => {
     return res.status(500).send("Internal server error");
   }
 });
+
+
 
 app.listen(3000, () => {
   console.log("Listening on port 3000");
