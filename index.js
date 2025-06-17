@@ -76,7 +76,7 @@ async function ensureReferralCode(customer) {
 async function getReferrerByCode(refCode, excludeId = null) {
   const query = `metafield:referral.code=${refCode}`;
   const url = `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/search.json?query=${encodeURIComponent(query)}`;
-  const res = await axios.get(url,payload, {
+  const res = await axios.get(url, {
     headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
   });
   console.log('✅ Metafield updated:', res.data);
@@ -105,7 +105,10 @@ app.post('/webhook/customers/update', async (req, res) => {
     }
 
     const refMatch = note.match(/ref:(\d+)/);
-    if (!refMatch) return res.status(200).send('No referral code found');
+    if (!refMatch) {
+      console.log(`⚠️ No referral code in note: ${note}`);
+      return res.status(200).send('No referral code found');
+    }
     const refCode = refMatch[1];
 
     const referrer = await getReferrerByCode(refCode, customerId);
@@ -119,8 +122,12 @@ app.post('/webhook/customers/update', async (req, res) => {
     let current = 0, mId = null;
     for (const mf of meta.metafields) {
       if (mf.namespace === 'loyalty' && mf.key === 'points') {
-        current = parseInt(mf.value) || 0;
-        mId = mf.id;
+        if (mf.type !== 'number_integer') {
+          console.warn(`⚠️ Wrong metafield type found: ${mf.type}`);
+        } else {
+          current = parseInt(mf.value) || 0;
+          mId = mf.id;
+        }
       }
     }
 
@@ -170,6 +177,9 @@ console.log('✅ Shopify metafield response:', response.data);
     console.error('❌ customers/update error:', err.response?.data || err.message);
     return res.status(500).send('Internal server error');
   }
+
+console.log('🎯 Metafield updated or created:', response.data.metafield);
+
 });
 
 /* ------------------ Start Server ------------------ */
