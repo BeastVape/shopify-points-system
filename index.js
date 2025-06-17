@@ -79,8 +79,9 @@ async function getReferrerByCode(refCode, excludeId = null) {
   const res = await axios.get(url, {
     headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
   });
-  console.log('✅ Metafield updated:', res.data);
-  const referrer = res.data.customers.find(c => c.id !== excludeId);
+  //console.log('✅ Metafield updated:', res.data);
+  const referrer = res.data.customers.find(c => String(c.id) !== String(excludeId));
+  console.log('✅ Metafield updated:', res.data).customer;
   return referrer || null;
 }
 
