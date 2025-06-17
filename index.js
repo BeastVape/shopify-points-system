@@ -76,9 +76,10 @@ async function ensureReferralCode(customer) {
 async function getReferrerByCode(refCode, excludeId = null) {
   const query = `metafield:referral.code=${refCode}`;
   const url = `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/search.json?query=${encodeURIComponent(query)}`;
-  const res = await axios.get(url, {
+  const res = await axios.get(url,payload, {
     headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
   });
+  console.log('✅ Metafield updated:', res.data);
   const referrer = res.data.customers.find(c => c.id !== excludeId);
   return referrer || null;
 }
@@ -123,29 +124,34 @@ app.post('/webhook/customers/update', async (req, res) => {
       }
     }
 
-    const newPoints = current + 10;
-    const payload = {
-      metafield: {
-        namespace: 'loyalty',
-        key: 'points',
-        value: newPoints,
-        type: 'number_integer'
-      }
-    };
+const newPoints = String(current + 10); // ← convert to string
 
-    if (mId) {
-      await axios.put(
-        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/metafields/${mId}.json`,
-        payload,
-        { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-      );
-    } else {
-      await axios.post(
-        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
-        payload,
-        { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-      );
-    }
+const payload = {
+  metafield: {
+    namespace: 'loyalty',
+    key: 'points',
+    value: newPoints,
+    type: 'number_integer'
+  }
+};
+
+let response;
+if (mId) {
+  response = await axios.put(
+    `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/metafields/${mId}.json`,
+    payload,
+    { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+  );
+} else {
+  response = await axios.post(
+    `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
+    payload,
+    { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+  );
+}
+
+console.log('✅ Shopify metafield response:', response.data);
+
 
     await axios.put(
       `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}.json`,
