@@ -76,14 +76,23 @@ async function ensureReferralCode(customer) {
 async function getReferrerByCode(refCode, excludeId = null) {
   const query = `metafield:referral.code=${refCode}`;
   const url = `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/search.json?query=${encodeURIComponent(query)}`;
+  
   const res = await axios.get(url, {
     headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
   });
-  //console.log('✅ Metafield updated:', res.data);
-  const referrer = res.data.customers.find(c => String(c.id) !== String(excludeId));
-  console.log('✅ Metafield updated:', res.data).customer;
-  return referrer || null;
+
+  const candidates = res.data.customers || [];
+
+  // Only reward the one whose ID exactly matches the referral code
+  const referrer = candidates.find(c => String(c.id) === String(refCode));
+
+  if (referrer && String(referrer.id) !== String(excludeId)) {
+    return referrer;
+  }
+
+  return null;
 }
+
 
 /* ------------------ Webhook: customers/update ------------------ */
 app.post('/webhook/customers/update', async (req, res) => {
@@ -91,30 +100,42 @@ app.post('/webhook/customers/update', async (req, res) => {
   console.log(`✅ customers/update webhook triggered for ID: ${customerId}`);
 
   try {
-    const { data } = await axios.get(
+    // Get full customer data
+    const response = await axios.get(
       `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}.json`,
       { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
     );
-    const customer = data.customer;
+
+    const customer = response.data?.customer;
+    if (!customer) {
+      console.error('❌ Customer not found in Shopify response:', response.data);
+      return res.status(500).send('Customer not found');
+    }
+
     const tags = customer.tags?.split(',').map(t => t.trim()) || [];
     const note = customer.note || '';
 
+    // Ensure this customer has a referral code metafield + tag
     await ensureReferralCode(customer);
 
+    // Exit if not verified or already rewarded
     if (!tags.includes('age_verified') || tags.includes('referral_rewarded')) {
       return res.status(200).send('No action needed');
     }
 
+    // Extract referral code from note
     const refMatch = note.match(/ref:(\d+)/);
-    if (!refMatch) {
-      console.log(`⚠️ No referral code in note: ${note}`);
-      return res.status(200).send('No referral code found');
-    }
+    if (!refMatch) return res.status(200).send('No referral code found');
     const refCode = refMatch[1];
 
+    // Find the actual referrer (must match ID exactly)
     const referrer = await getReferrerByCode(refCode, customerId);
-    if (!referrer) return res.status(200).send('Referrer not found');
+    if (!referrer) {
+      console.warn(`⚠️ Referrer with code ${refCode} not found`);
+      return res.status(200).send('Referrer not found');
+    }
 
+    // Fetch current referrer's loyalty points
     const { data: meta } = await axios.get(
       `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
       { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
@@ -123,44 +144,39 @@ app.post('/webhook/customers/update', async (req, res) => {
     let current = 0, mId = null;
     for (const mf of meta.metafields) {
       if (mf.namespace === 'loyalty' && mf.key === 'points') {
-        if (mf.type !== 'number_integer') {
-          console.warn(`⚠️ Wrong metafield type found: ${mf.type}`);
-        } else {
-          current = parseInt(mf.value) || 0;
-          mId = mf.id;
-        }
+        current = parseInt(mf.value) || 0;
+        mId = mf.id;
       }
     }
 
-const newPoints = String(current + 10); // ← convert to string
+    const newPoints = String(current + 10);
+    const payload = {
+      metafield: {
+        namespace: 'loyalty',
+        key: 'points',
+        value: newPoints,
+        type: 'number_integer'
+      }
+    };
 
-const payload = {
-  metafield: {
-    namespace: 'loyalty',
-    key: 'points',
-    value: newPoints,
-    type: 'number_integer'
-  }
-};
+    let pointsRes;
+    if (mId) {
+      pointsRes = await axios.put(
+        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/metafields/${mId}.json`,
+        payload,
+        { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+      );
+    } else {
+      pointsRes = await axios.post(
+        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
+        payload,
+        { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+      );
+    }
 
-let response;
-if (mId) {
-  response = await axios.put(
-    `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/metafields/${mId}.json`,
-    payload,
-    { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-  );
-} else {
-  response = await axios.post(
-    `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
-    payload,
-    { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-  );
-}
+    console.log('✅ Loyalty points updated:', pointsRes.data);
 
-console.log('✅ Shopify metafield response:', response.data);
-
-
+    // Add "referral_rewarded" tag to avoid double reward
     await axios.put(
       `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}.json`,
       {
@@ -172,16 +188,14 @@ console.log('✅ Shopify metafield response:', response.data);
       { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
     );
 
-    console.log(`🎉 Referral reward: 10 points → Referrer ID: ${referrer.id}`);
+    console.log(`🎉 Referral reward granted: 10 points → Referrer ID: ${referrer.id}`);
     return res.status(200).send('Referral rewarded');
   } catch (err) {
     console.error('❌ customers/update error:', err.response?.data || err.message);
     return res.status(500).send('Internal server error');
   }
-
-console.log('🎯 Metafield updated or created:', response.data.metafield);
-
 });
+
 
 /* ------------------ Webhook: orders ------------------ */
 app.post('/webhook/orders', async (req, res) => {
