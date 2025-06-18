@@ -320,9 +320,15 @@ app.post('/webhook/orders', async (req, res) => {
 });
 /* ------------------ Webhook: orders/fulfilled ------------------ */
 app.post('/webhook/orders/fulfilled', async (req, res) => {
+  console.log('✅ Fulfillment webhook triggered');
+  console.log('📦 Webhook Payload:', JSON.stringify(req.body, null, 2));
+
   const order = req.body;
   const customerId = order?.customer?.id;
-  if (!customerId) return res.status(400).send('Missing customer ID');
+  if (!customerId) {
+    console.error('❌ Missing customer ID in order');
+    return res.status(400).send('Missing customer ID');
+  }
 
   try {
     const { data: customerData } = await axios.get(
@@ -333,16 +339,28 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
     const tags = customer.tags?.split(',').map(t => t.trim()) || [];
     const note = customer.note || '';
 
+    console.log('🧾 Customer ID:', customerId);
+    console.log('🗒️ Note field:', note);
+
     const refMatch = note.match(/ref:(\d+)/);
-    if (!refMatch) return res.status(200).send('No referrer');
+    if (!refMatch) {
+      console.warn('⚠️ No referrer code found in customer note');
+      return res.status(200).send('No referrer');
+    }
 
     const refCode = refMatch[1];
     const referrer = await getReferrerByCode(refCode, customerId);
-    if (!referrer) return res.status(200).send('No referrer found');
+    if (!referrer) {
+      console.warn('⚠️ Referrer not found for code:', refCode);
+      return res.status(200).send('No referrer found');
+    }
+
+    console.log('👥 Referrer ID:', referrer.id);
 
     // Calculate commission
     let commissionTotal = 0;
     for (const item of order.line_items) {
+      console.log(`🔍 Checking product ID ${item.product_id} x${item.quantity}`);
       try {
         const { data: productData } = await axios.get(
           `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/products/${item.product_id}/metafields.json`,
@@ -352,23 +370,26 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
         const mf = productData.metafields.find(
           m => m.namespace === 'commission' && m.key === 'referrer'
         );
+
         if (mf) {
           const value = parseFloat(mf.value || '0');
-          commissionTotal += value * item.quantity;
+          const total = value * item.quantity;
+          commissionTotal += total;
+          console.log(`✅ Found commission metafield: ${value} x${item.quantity} = ${total}`);
+        } else {
+          console.warn(`❌ No commission metafield found for product ${item.product_id}`);
         }
       } catch (err) {
-        console.warn(`Error reading metafields for product ${item.product_id}`, err.message);
+        console.warn(`❌ Error reading metafields for product ${item.product_id}:`, err.response?.data || err.message);
       }
     }
 
     if (commissionTotal === 0) {
+      console.warn('⚠️ No commission calculated from any products');
       return res.status(200).send('No commission to reward');
     }
 
-    console.log('--> Fulfillment for Order ID:', order.id);
-    console.log('Customer Note:', customer.note);
-    console.log('Referrer ID Found:', refCode, 'Referrer Valid:', !!referrer);
-    console.log('Commission total calculated:', commissionTotal);
+    console.log(`💸 Commission to award: ${Math.floor(commissionTotal)} points`);
 
     // Update referrer's points
     const { data: metaData } = await axios.get(
@@ -394,12 +415,14 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
     };
 
     if (mId) {
+      console.log(`🛠 Updating existing loyalty metafield ID ${mId} → ${payload.metafield.value}`);
       await axios.put(
         `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/metafields/${mId}.json`,
         payload,
         { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
       );
     } else {
+      console.log(`➕ Creating new loyalty metafield with value ${payload.metafield.value}`);
       await axios.post(
         `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
         payload,
@@ -414,6 +437,7 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
     res.status(500).send('Error processing fulfilled order');
   }
 });
+
 
 
 
