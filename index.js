@@ -221,6 +221,34 @@ app.post('/webhook/orders', async (req, res) => {
         const refCode = refMatch[1];
         const referrer = await getReferrerByCode(refCode, customerId);
         if (referrer) {
+          // 🎯 Product-based commission
+          let commissionTotal = 0;
+          for (const item of order.line_items) {
+            const productId = item.product_id;
+            try {
+              const { data: productData } = await axios.get(
+                `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/products/${productId}/metafields.json`,
+                { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+              );
+
+              const metafield = productData.metafields.find(mf =>
+                mf.namespace === 'commission' && mf.key === 'referrer'
+              );
+
+              if (metafield) {
+                const commissionValue = parseFloat(metafield.value || '0');
+                const itemTotal = commissionValue * item.quantity;
+                commissionTotal += itemTotal;
+              }
+            } catch (err) {
+              console.warn(`⚠️ Error checking commission for product ${productId}`, err.message);
+            }
+          }
+
+          // ➕ Add 10 base referral points only once
+          commissionTotal += 10;
+
+          // 🎯 Update referrer points
           const { data: meta } = await axios.get(
             `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
             { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
@@ -234,21 +262,7 @@ app.post('/webhook/orders', async (req, res) => {
             }
           }
 
-          // 🧮 Calculate Commission per Product
-          let commission = 0;
-          for (const item of order.line_items || []) {
-            const metafields = await axios.get(
-              `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/products/${item.product_id}/metafields.json`,
-              { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-            );
-
-            const mf = metafields.data.metafields.find(mf => mf.namespace === 'referral' && mf.key === 'commission');
-            if (mf) {
-              commission += parseInt(mf.value || '0') * item.quantity;
-            }
-          }
-
-          const newPoints = current + commission;
+          const newPoints = current + Math.floor(commissionTotal);
           const payload = {
             metafield: {
               namespace: 'loyalty',
@@ -272,18 +286,19 @@ app.post('/webhook/orders', async (req, res) => {
             );
           }
 
+          console.log(`🎁 Total Referral Reward: +${Math.floor(commissionTotal)} pts → Referrer ID: ${referrer.id}`);
+
+          // Tag customer to avoid double reward
           await axios.put(
             `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}.json`,
             { customer: { id: customerId, tags: [...tags, 'referral_rewarded'].join(', ') } },
             { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
           );
-
-          console.log(`🎁 Order Referral: +${commission} pts → Referrer ID: ${referrer.id}`);
         }
       }
     }
 
-    // 💎 Order Total Points
+    // 💎 Buyer Points from Total Amount
     let points = Math.floor(total / 50);
     if (tags.some(t => t.startsWith('referrer-'))) points += Math.floor(points * 0.05);
 
@@ -324,13 +339,14 @@ app.post('/webhook/orders', async (req, res) => {
       );
     }
 
-    console.log(`💰 Order Points: +${points} to customer ID ${customerId}`);
+    console.log(`💰 Buyer Points: +${points} to customer ID ${customerId}`);
     return res.status(200).send('Order webhook processed');
   } catch (err) {
     console.error('❌ order webhook error:', err.response?.data || err.message);
     return res.status(500).send('Internal error');
   }
 });
+
 
 
 
