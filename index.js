@@ -365,6 +365,11 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
       return res.status(200).send('No commission to reward');
     }
 
+    console.log('--> Fulfillment for Order ID:', order.id);
+    console.log('Customer Note:', customer.note);
+    console.log('Referrer ID Found:', refCode, 'Referrer Valid:', !!referrer);
+    console.log('Commission total calculated:', commissionTotal);
+
     // Update referrer's points
     const { data: metaData } = await axios.get(
       `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
