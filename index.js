@@ -1,13 +1,18 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
+const cors = require('cors');
+require('dotenv').config();
+
 const app = express();
+const PORT = process.env.PORT || 3000;
+const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
+const SHOPIFY_STORE = 'j0f9pj-rd.myshopify.com';
+const API_VERSION = '2024-04';
 
-const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN || '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';
-const SHOPIFY_STORE        = 'j0f9pj-rd.myshopify.com';
-const API_VERSION          = '2024-04';
-
+app.use(cors());
 app.use(bodyParser.json());
+
 
 /* ------------------ Helper: Generate and Fix Referral Code ------------------ */
 function generateReferralCode(customerId) {
@@ -92,6 +97,84 @@ async function getReferrerByCode(refCode, excludeId = null) {
 
   return null;
 }
+
+/* ------------------ Redeem Points Endpoint ------------------ */
+app.post('/redeem', async (req, res) => {
+  const { customerId, pointsToRedeem } = req.body;
+  if (!customerId || !pointsToRedeem || isNaN(pointsToRedeem)) {
+    return res.status(400).json({ error: 'Missing or invalid input' });
+  }
+
+  try {
+    const { data: metafieldsRes } = await axios.get(
+      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}/metafields.json`,
+      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+    );
+
+    let current = 0, mId = null;
+    for (const mf of metafieldsRes.metafields) {
+      if (mf.namespace === 'loyalty' && mf.key === 'points') {
+        current = parseInt(mf.value) || 0;
+        mId = mf.id;
+      }
+    }
+
+    if (current < pointsToRedeem) {
+      return res.status(400).json({ error: 'Not enough points' });
+    }
+
+    const newPoints = current - pointsToRedeem;
+    const payload = {
+      metafield: {
+        namespace: 'loyalty',
+        key: 'points',
+        value: newPoints,
+        type: 'number_integer'
+      }
+    };
+
+    if (mId) {
+      await axios.put(
+        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/metafields/${mId}.json`,
+        payload,
+        { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+      );
+    } else {
+      await axios.post(
+        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}/metafields.json`,
+        payload,
+        { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+      );
+    }
+
+    return res.json({ success: true, newBalance: newPoints });
+  } catch (error) {
+    console.error('Redeem error:', error.response?.data || error.message);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/* ------------------ Check Points Endpoint ------------------ */
+app.get('/points/:customerId', async (req, res) => {
+  const { customerId } = req.params;
+
+  try {
+    const { data } = await axios.get(
+      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}/metafields.json`,
+      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+    );
+
+    const pointsField = data.metafields.find(
+      mf => mf.namespace === 'loyalty' && mf.key === 'points'
+    );
+
+    const points = pointsField ? parseInt(pointsField.value) || 0 : 0;
+    return res.json({ customerId, points });
+  } catch (err) {
+    console.error('Fetch points error:', err.response?.data || err.message);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
 
 
 /* ------------------ Webhook: customers/update ------------------ */
@@ -235,7 +318,21 @@ app.post('/webhook/orders', async (req, res) => {
             }
           }
 
-          const newPoints = current + 10;
+          // 🧮 Calculate Commission per Product
+          let commission = 0;
+          for (const item of order.line_items || []) {
+            const metafields = await axios.get(
+              `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/products/${item.product_id}/metafields.json`,
+              { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+            );
+
+            const mf = metafields.data.metafields.find(mf => mf.namespace === 'referral' && mf.key === 'commission');
+            if (mf) {
+              commission += parseInt(mf.value || '0') * item.quantity;
+            }
+          }
+
+          const newPoints = current + commission;
           const payload = {
             metafield: {
               namespace: 'loyalty',
@@ -259,14 +356,13 @@ app.post('/webhook/orders', async (req, res) => {
             );
           }
 
-          // Tag this customer to avoid duplicate rewards
           await axios.put(
             `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}.json`,
             { customer: { id: customerId, tags: [...tags, 'referral_rewarded'].join(', ') } },
             { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
           );
 
-          console.log(`🎁 Order Referral: 10 pts → Referrer ID: ${referrer.id}`);
+          console.log(`🎁 Order Referral: +${commission} pts → Referrer ID: ${referrer.id}`);
         }
       }
     }
@@ -319,6 +415,7 @@ app.post('/webhook/orders', async (req, res) => {
     return res.status(500).send('Internal error');
   }
 });
+
 
 
 /* ------------------ Start Server ------------------ */
