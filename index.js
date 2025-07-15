@@ -290,6 +290,34 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
       return res.status(200).send('Referrer is not affiliate');
     }
 
+    // --- Check referrer reward count limit ---
+    const { data: refMeta } = await axios.get(
+      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
+      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+    );
+
+    let refPoints = 0;
+    let refMid = null;
+    let rewardedCount = 0;
+    let rewardedCountId = null;
+
+    for (const mf of refMeta.metafields) {
+      if (mf.namespace === 'loyalty' && mf.key === 'points') {
+        refPoints = parseInt(mf.value) || 0;
+        refMid = mf.id;
+      }
+      if (mf.namespace === 'referral' && mf.key === 'rewarded_count') {
+        rewardedCount = parseInt(mf.value) || 0;
+        rewardedCountId = mf.id;
+      }
+    }
+
+    if (rewardedCount >= 5) {
+      console.log(`🔒 Referrer ID ${referrer.id} has already reached 5 referrals. Skipping reward.`);
+      return res.status(200).send('Referrer reached max reward limit');
+    }
+
+    // --- Calculate commission ---
     let commissionTotal = 0;
     for (const item of lineItems) {
       try {
@@ -311,19 +339,6 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
     }
 
     if (commissionTotal > 0) {
-      const { data: refMeta } = await axios.get(
-        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
-        { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-      );
-
-      let refPoints = 0, refMid = null;
-      for (const mf of refMeta.metafields) {
-        if (mf.namespace === 'loyalty' && mf.key === 'points') {
-          refPoints = parseInt(mf.value) || 0;
-          refMid = mf.id;
-        }
-      }
-
       const refPayload = {
         metafield: {
           namespace: 'loyalty',
@@ -349,6 +364,32 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
 
       console.log(`🎯 Commission: +${Math.floor(commissionTotal)} pts → Referrer ID ${referrer.id}`);
     }
+
+    // --- Update referral rewarded count ---
+    const newCountPayload = {
+      metafield: {
+        namespace: 'referral',
+        key: 'rewarded_count',
+        value: rewardedCount + 1,
+        type: 'number_integer'
+      }
+    };
+
+    if (rewardedCountId) {
+      await axios.put(
+        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/metafields/${rewardedCountId}.json`,
+        newCountPayload,
+        { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+      );
+    } else {
+      await axios.post(
+        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
+        newCountPayload,
+        { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+      );
+    }
+
+    console.log(`✅ Referrer ID ${referrer.id} rewarded referral count updated to ${rewardedCount + 1}`);
 
     return res.status(200).send('Webhook processed');
   } catch (err) {
