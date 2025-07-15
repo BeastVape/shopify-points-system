@@ -319,10 +319,10 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
         if (mf.namespace === 'referral' && mf.key === 'rewarded_count') {
           rewardedCount = parseInt(mf.value) || 0;
           rewardedCountId = mf.id;
-          console.log(rewardedCountId);
+          
         }
       }
-
+      console.log(rewardedCount);
       // ⛔ Limit: max 5 rewards
       if (rewardedCount >= 5) {
         console.log(`🔒 Referrer ID ${referrer.id} has already reached 5 referrals. Skipping reward.`);
@@ -360,7 +360,7 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
         metafield: {
           namespace: 'referral',
           key: 'rewarded_count',
-          value: String(rewardedCount + 1),
+          value: rewardedCount + 1,
           type: 'number_integer'
         }
       };
