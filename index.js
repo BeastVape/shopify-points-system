@@ -447,24 +447,23 @@ app.get('/apps/referral/check-code', async (req, res) => {
     return res.status(400).json({ valid: false, message: 'No code provided' });
   }
 
-  let page = 1;
   let found = false;
+  let nextPageInfo = null;
 
   try {
-    while (!found) {
-      const customerRes = await axios.get(
-        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers.json?limit=50&page=${page}`,
-        {
-          headers: {
-            'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+    do {
+      const customerUrl = `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers.json?limit=50${
+        nextPageInfo ? `&page_info=${nextPageInfo}` : ''
+      }`;
+
+      const customerRes = await axios.get(customerUrl, {
+        headers: {
+          'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+        },
+      });
 
       const customers = customerRes.data.customers;
-
-      if (customers.length === 0) break;
+      if (!customers || customers.length === 0) break;
 
       for (const customer of customers) {
         try {
@@ -484,27 +483,35 @@ app.get('/apps/referral/check-code', async (req, res) => {
               mf.value === codeToCheck
           );
 
-          console.log(`[${customer.email}] Metafields:`, metafieldsRes.data.metafields);
-
           if (match) {
             found = true;
             return res.json({ valid: true, customer_id: customer.id });
           }
-
         } catch (err) {
-          console.error(`Failed to fetch metafields for customer ${customer.id}:`, err.message);
+          console.error(`Metafields error for customer ${customer.id}:`, err.message);
         }
       }
 
-      page++;
-    }
+      // Parse next page from Link header
+      const linkHeader = customerRes.headers['link'];
+      const matchNext = linkHeader && linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+
+      if (matchNext) {
+        const url = new URL(matchNext[1]);
+        nextPageInfo = url.searchParams.get('page_info');
+      } else {
+        nextPageInfo = null;
+      }
+
+    } while (!found && nextPageInfo);
 
     return res.json({ valid: false });
   } catch (error) {
-    console.error('Error checking referral code:', error.message);
+    console.error('Error checking referral code:', error.response?.data || error.message);
     return res.status(500).json({ valid: false, error: error.message });
   }
 });
+
 
 
 
