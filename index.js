@@ -197,83 +197,46 @@ app.post('/webhook/customers/update', async (req, res) => {
   }
 });
 /* ------------------ Webhook: orders ------------------ */
-app.post('/webhook/orders', async (req, res) => {
+app.post('/webhook/orders/fulfilled', async (req, res) => {
+  console.log('✅ Fulfillment webhook triggered');
   const order = req.body;
   const customerId = order?.customer?.id;
-  const total = parseFloat(order.total_price || 0);
 
-  if (!customerId || isNaN(total)) return res.status(400).send('Invalid order data');
+  if (!customerId) return res.status(400).send('Missing customer ID');
 
   try {
-    const { data } = await axios.get(
+    const { data: customerData } = await axios.get(
       `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}.json`,
       { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
     );
-
-    const customer = data.customer;
+    const customer = customerData.customer;
     const tags = customer.tags?.split(',').map(t => t.trim()) || [];
     const note = customer.note || '';
+    const lineItems = order.line_items || [];
 
-    // 🔁 Referral Reward (only once)
-    if (!tags.includes('referral_rewarded')) {
-      const refMatch = note.match(/ref:(\d+)/);
-      if (refMatch) {
-        const refCode = refMatch[1];
-        const referrer = await getReferrerByCode(refCode, customerId);
-        if (referrer) {
-          const { data: meta } = await axios.get(
-            `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
-            { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-          );
+    // --- LOYALTY POINTS FOR CUSTOMER ---
+    let totalPoints = 0;
 
-          let current = 0, mId = null;
-          for (const mf of meta.metafields) {
-            if (mf.namespace === 'loyalty' && mf.key === 'points') {
-              current = parseInt(mf.value) || 0;
-              mId = mf.id;
-            }
-          }
+    for (const item of lineItems) {
+      try {
+        const { data: productData } = await axios.get(
+          `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/products/${item.product_id}/metafields.json`,
+          { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+        );
 
-          const newPoints = current + 10;
-          const payload = {
-            metafield: {
-              namespace: 'loyalty',
-              key: 'points',
-              value: newPoints,
-              type: 'number_integer'
-            }
-          };
+        const pointsField = productData.metafields.find(
+          mf => mf.namespace === 'loyalty' && mf.key === 'points'
+        );
 
-          if (mId) {
-            await axios.put(
-              `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/metafields/${mId}.json`,
-              payload,
-              { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-            );
-          } else {
-            await axios.post(
-              `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
-              payload,
-              { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-            );
-          }
+        const points = parseInt(pointsField?.value || '0');
+        totalPoints += points * item.quantity;
 
-          // Tag this customer to avoid duplicate rewards
-          await axios.put(
-            `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}.json`,
-            { customer: { id: customerId, tags: [...tags, 'referral_rewarded'].join(', ') } },
-            { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-          );
-
-          console.log(`🎁 Order Referral: 10 pts → Referrer ID: ${referrer.id}`);
-        }
+      } catch (err) {
+        console.warn(`⚠️ Error getting product metafields for ${item.product_id}:`, err.message);
       }
     }
 
-    // 💎 Order Total Points
-    let points = Math.floor(total / 50);
-    if (tags.some(t => t.startsWith('referrer-'))) points += Math.floor(points * 0.05);
-
+    // Update customer points
     const { data: metas } = await axios.get(
       `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}/metafields.json`,
       { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
@@ -287,7 +250,7 @@ app.post('/webhook/orders', async (req, res) => {
       }
     }
 
-    const newTotal = current + points;
+    const newTotal = current + totalPoints;
     const payload = {
       metafield: {
         namespace: 'loyalty',
@@ -311,132 +274,90 @@ app.post('/webhook/orders', async (req, res) => {
       );
     }
 
-    console.log(`💰 Order Points: +${points} to customer ID ${customerId}`);
-    return res.status(200).send('Order webhook processed');
-  } catch (err) {
-    console.error('❌ order webhook error:', err.response?.data || err.message);
-    return res.status(500).send('Internal error');
-  }
-});
-/* ------------------ Webhook: orders/fulfilled ------------------ */
-app.post('/webhook/orders/fulfilled', async (req, res) => {
-  console.log('✅ Fulfillment webhook triggered');
-  console.log('📦 Webhook Payload:', JSON.stringify(req.body, null, 2));
+    console.log(`💰 Loyalty Points: +${totalPoints} → Customer ID ${customerId}`);
 
-  const order = req.body;
-  const customerId = order?.customer?.id;
-  if (!customerId) {
-    console.error('❌ Missing customer ID in order');
-    return res.status(400).send('Missing customer ID');
-  }
-
-  try {
-    const { data: customerData } = await axios.get(
-      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customerId}.json`,
-      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-    );
-    const customer = customerData.customer;
-    const tags = customer.tags?.split(',').map(t => t.trim()) || [];
-    const note = customer.note || '';
-
-    console.log('🧾 Customer ID:', customerId);
-    console.log('🗒️ Note field:', note);
-
+    // --- COMMISSION FOR REFERRER (ONLY IF AFFILIATE) ---
     const refMatch = note.match(/ref:(\d+)/);
-    if (!refMatch) {
-      console.warn('⚠️ No referrer code found in customer note');
-      return res.status(200).send('No referrer');
-    }
-
+    if (!refMatch) return res.status(200).send('No referral found');
     const refCode = refMatch[1];
+
     const referrer = await getReferrerByCode(refCode, customerId);
-    if (!referrer) {
-      console.warn('⚠️ Referrer not found for code:', refCode);
-      return res.status(200).send('No referrer found');
+    if (!referrer) return res.status(200).send('Referrer not found');
+
+    const referrerTags = referrer.tags?.split(',').map(t => t.trim()) || [];
+    if (!referrerTags.includes('affiliate')) {
+      console.log(`❌ Referrer ID ${referrer.id} is not an affiliate`);
+      return res.status(200).send('Referrer is not affiliate');
     }
 
-    console.log('👥 Referrer ID:', referrer.id);
-
-    // Calculate commission
     let commissionTotal = 0;
-    for (const item of order.line_items) {
-      console.log(`🔍 Checking product ID ${item.product_id} x${item.quantity}`);
+    for (const item of lineItems) {
       try {
         const { data: productData } = await axios.get(
           `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/products/${item.product_id}/metafields.json`,
           { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
         );
 
-        const mf = productData.metafields.find(
-          m => m.namespace === 'commission' && m.key === 'referrer'
+        const commissionField = productData.metafields.find(
+          mf => mf.namespace === 'commission' && mf.key === 'referrer'
         );
 
-        if (mf) {
-          const value = parseFloat(mf.value || '0');
-          const total = value * item.quantity;
-          commissionTotal += total;
-          console.log(`✅ Found commission metafield: ${value} x${item.quantity} = ${total}`);
-        } else {
-          console.warn(`❌ No commission metafield found for product ${item.product_id}`);
-        }
+        const commission = parseFloat(commissionField?.value || '0');
+        commissionTotal += commission * item.quantity;
+
       } catch (err) {
-        console.warn(`❌ Error reading metafields for product ${item.product_id}:`, err.response?.data || err.message);
+        console.warn(`⚠️ Error getting commission for product ${item.product_id}:`, err.message);
       }
     }
 
-    if (commissionTotal === 0) {
-      console.warn('⚠️ No commission calculated from any products');
-      return res.status(200).send('No commission to reward');
-    }
-
-    console.log(`💸 Commission to award: ${Math.floor(commissionTotal)} points`);
-
-    // Update referrer's points
-    const { data: metaData } = await axios.get(
-      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
-      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-    );
-
-    let current = 0, mId = null;
-    for (const mf of metaData.metafields) {
-      if (mf.namespace === 'loyalty' && mf.key === 'points') {
-        current = parseInt(mf.value) || 0;
-        mId = mf.id;
-      }
-    }
-
-    const payload = {
-      metafield: {
-        namespace: 'loyalty',
-        key: 'points',
-        value: Math.floor(current + commissionTotal),
-        type: 'number_integer'
-      }
-    };
-
-    if (mId) {
-      console.log(`🛠 Updating existing loyalty metafield ID ${mId} → ${payload.metafield.value}`);
-      await axios.put(
-        `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/metafields/${mId}.json`,
-        payload,
-        { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
-      );
-    } else {
-      console.log(`➕ Creating new loyalty metafield with value ${payload.metafield.value}`);
-      await axios.post(
+    if (commissionTotal > 0) {
+      const { data: refMeta } = await axios.get(
         `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
-        payload,
         { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
       );
+
+      let refPoints = 0, refMid = null;
+      for (const mf of refMeta.metafields) {
+        if (mf.namespace === 'loyalty' && mf.key === 'points') {
+          refPoints = parseInt(mf.value) || 0;
+          refMid = mf.id;
+        }
+      }
+
+      const refPayload = {
+        metafield: {
+          namespace: 'loyalty',
+          key: 'points',
+          value: Math.floor(refPoints + commissionTotal),
+          type: 'number_integer'
+        }
+      };
+
+      if (refMid) {
+        await axios.put(
+          `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/metafields/${refMid}.json`,
+          refPayload,
+          { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+        );
+      } else {
+        await axios.post(
+          `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
+          refPayload,
+          { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+        );
+      }
+
+      console.log(`🎯 Commission: +${Math.floor(commissionTotal)} pts → Referrer ID ${referrer.id}`);
     }
 
-    console.log(`🎯 Fulfilled Referral: +${Math.floor(commissionTotal)} pts → Referrer ID: ${referrer.id}`);
-    res.status(200).send('Commission rewarded');
+    return res.status(200).send('Webhook processed');
   } catch (err) {
     console.error('❌ Fulfillment error:', err.response?.data || err.message);
-    res.status(500).send('Error processing fulfilled order');
+    return res.status(500).send('Internal error');
   }
 });
+
+
 
 /* ------------------ Validate the referral code ------------------ */
 // Endpoint: /apps/referral/check-code?code=123456
