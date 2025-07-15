@@ -439,27 +439,56 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
 });
 
 /* ------------------ Validate the referral code ------------------ */
+// Endpoint: /apps/referral/check-code?code=123456
 app.get('/apps/referral/check-code', async (req, res) => {
-  const code = req.query.code;
-  const customers = await shopify.api.rest.Customer.all({
-    session: res.locals.shopify.session,
-  });
+  const codeToCheck = req.query.code;
 
-  const found = await Promise.any(customers.map(async customer => {
-    const metafields = await shopify.api.rest.Metafield.all({
-      session: res.locals.shopify.session,
-      owner_resource: 'customer',
-      owner_id: customer.id,
-    });
+  if (!codeToCheck) {
+    return res.status(400).json({ valid: false, message: 'No code provided' });
+  }
 
-    return metafields.find(mf =>
-      mf.namespace === 'referral' &&
-      mf.key === 'code' &&
-      mf.value === code
+  try {
+    // Get all customers (or use pagination if needed)
+    const customersResponse = await axios.get(
+      `https://${SHOP}/admin/api/2024-01/customers.json`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': ADMIN_API_ACCESS_TOKEN,
+          'Content-Type': 'application/json',
+        },
+      }
     );
-  }).filter(Boolean));
 
-  res.json({ valid: !!found });
+    const customers = customersResponse.data.customers;
+
+    // Loop through each customer to check their metafields
+    for (const customer of customers) {
+      const metafieldsResponse = await axios.get(
+        `https://${SHOP}/admin/api/2024-01/customers/${customer.id}/metafields.json`,
+        {
+          headers: {
+            'X-Shopify-Access-Token': ADMIN_API_ACCESS_TOKEN,
+          },
+        }
+      );
+
+      const referralMetafield = metafieldsResponse.data.metafields.find(
+        (mf) =>
+          mf.namespace === 'referral' &&
+          mf.key === 'code' &&
+          mf.value === codeToCheck
+      );
+
+      if (referralMetafield) {
+        return res.json({ valid: true });
+      }
+    }
+
+    return res.json({ valid: false });
+  } catch (error) {
+    console.error('Error checking referral code:', error.message);
+    return res.status(500).json({ valid: false, error: error.message });
+  }
 });
 
 
