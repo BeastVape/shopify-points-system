@@ -453,7 +453,7 @@ app.get('/apps/referral/check-code', async (req, res) => {
   try {
     while (!found) {
       const customerRes = await axios.get(
-        `https://${SHOP}/admin/api/2024-01/customers.json?limit=50&page=${page}`,
+        `https://${SHOPIFY_STORE}/admin/api/2024-01/customers.json?limit=50&page=${page}`,
         {
           headers: {
             'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
@@ -469,7 +469,7 @@ app.get('/apps/referral/check-code', async (req, res) => {
       for (const customer of customers) {
         try {
           const metafieldsRes = await axios.get(
-            `https://${SHOP}/admin/api/2024-01/customers/${customer.id}/metafields.json`,
+            `https://${SHOPIFY_STORE}/admin/api/2024-01/customers/${customer.id}/metafields.json`,
             {
               headers: {
                 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
