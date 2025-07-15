@@ -153,6 +153,12 @@ app.post('/webhook/customers/update', async (req, res) => {
       }
     }
 
+    // 🚫 Stop if referrer already has 5 or more referrals
+    if (currentCount >= 5) {
+      console.log(`🔒 Referrer ID ${referrer.id} has reached the referral cap of 5.`);
+      return res.status(200).send('Referral cap reached. No points awarded.');
+    }
+
     // --- Update Loyalty Points ---
     const newPoints = currentPoints + 10;
     const pointsPayload = {
@@ -226,7 +232,6 @@ app.post('/webhook/customers/update', async (req, res) => {
     return res.status(500).send('Internal server error');
   }
 });
-
 
 /* ------------------ Webhook: orders ------------------ */
 app.post('/webhook/orders/fulfilled', async (req, res) => {
@@ -382,8 +387,6 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
     return res.status(500).send('Internal error');
   }
 });
-
-
 
 /* ------------------ Validate the referral code ------------------ */
 // Endpoint: /apps/referral/check-code?code=123456
