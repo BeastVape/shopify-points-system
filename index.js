@@ -319,6 +319,7 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
         if (mf.namespace === 'referral' && mf.key === 'rewarded_count') {
           rewardedCount = parseInt(mf.value) || 0;
           rewardedCountId = mf.id;
+          console.log(rewardedCountId);
         }
       }
 
@@ -359,7 +360,7 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
         metafield: {
           namespace: 'referral',
           key: 'rewarded_count',
-          value: rewardedCount + 1,
+          value: String(rewardedCount + 1),
           type: 'number_integer'
         }
       };
