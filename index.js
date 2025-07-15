@@ -309,6 +309,7 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
         `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
         { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
       );
+      console.log("📦 Referrer Metafields:", refMeta.metafields);
 
       let refPoints = 0, refMid = null, rewardedCount = 0, rewardedCountId = null;
       for (const mf of refMeta.metafields) {
