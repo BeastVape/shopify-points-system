@@ -484,10 +484,13 @@ app.get('/apps/referral/check-code', async (req, res) => {
               mf.value === codeToCheck
           );
 
+          console.log(`[${customer.email}] Metafields:`, metafieldsRes.data.metafields);
+
           if (match) {
             found = true;
             return res.json({ valid: true, customer_id: customer.id });
           }
+
         } catch (err) {
           console.error(`Failed to fetch metafields for customer ${customer.id}:`, err.message);
         }
@@ -502,6 +505,7 @@ app.get('/apps/referral/check-code', async (req, res) => {
     return res.status(500).json({ valid: false, error: error.message });
   }
 });
+
 
 
 
