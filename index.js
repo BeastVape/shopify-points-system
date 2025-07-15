@@ -447,41 +447,53 @@ app.get('/apps/referral/check-code', async (req, res) => {
     return res.status(400).json({ valid: false, message: 'No code provided' });
   }
 
+  let page = 1;
+  let found = false;
+
   try {
-    // Get all customers (or use pagination if needed)
-    const customersResponse = await axios.get(
-      `https://${SHOP}/admin/api/2024-01/customers.json`,
-      {
-        headers: {
-          'X-Shopify-Access-Token': ADMIN_API_ACCESS_TOKEN,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    const customers = customersResponse.data.customers;
-
-    // Loop through each customer to check their metafields
-    for (const customer of customers) {
-      const metafieldsResponse = await axios.get(
-        `https://${SHOP}/admin/api/2024-01/customers/${customer.id}/metafields.json`,
+    while (!found) {
+      const customerRes = await axios.get(
+        `https://${SHOP}/admin/api/2024-01/customers.json?limit=50&page=${page}`,
         {
           headers: {
-            'X-Shopify-Access-Token': ADMIN_API_ACCESS_TOKEN,
+            'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+            'Content-Type': 'application/json',
           },
         }
       );
 
-      const referralMetafield = metafieldsResponse.data.metafields.find(
-        (mf) =>
-          mf.namespace === 'referral' &&
-          mf.key === 'code' &&
-          mf.value === codeToCheck
-      );
+      const customers = customerRes.data.customers;
 
-      if (referralMetafield) {
-        return res.json({ valid: true });
+      if (customers.length === 0) break;
+
+      for (const customer of customers) {
+        try {
+          const metafieldsRes = await axios.get(
+            `https://${SHOP}/admin/api/2024-01/customers/${customer.id}/metafields.json`,
+            {
+              headers: {
+                'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+              },
+            }
+          );
+
+          const match = metafieldsRes.data.metafields.find(
+            (mf) =>
+              mf.namespace === 'referral' &&
+              mf.key === 'code' &&
+              mf.value === codeToCheck
+          );
+
+          if (match) {
+            found = true;
+            return res.json({ valid: true, customer_id: customer.id });
+          }
+        } catch (err) {
+          console.error(`Failed to fetch metafields for customer ${customer.id}:`, err.message);
+        }
       }
+
+      page++;
     }
 
     return res.json({ valid: false });
