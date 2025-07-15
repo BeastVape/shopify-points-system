@@ -438,6 +438,29 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
   }
 });
 
+/* ------------------ Validate the referral code ------------------ */
+app.get('/apps/referral/check-code', async (req, res) => {
+  const code = req.query.code;
+  const customers = await shopify.api.rest.Customer.all({
+    session: res.locals.shopify.session,
+  });
+
+  const found = await Promise.any(customers.map(async customer => {
+    const metafields = await shopify.api.rest.Metafield.all({
+      session: res.locals.shopify.session,
+      owner_resource: 'customer',
+      owner_id: customer.id,
+    });
+
+    return metafields.find(mf =>
+      mf.namespace === 'referral' &&
+      mf.key === 'code' &&
+      mf.value === code
+    );
+  }).filter(Boolean));
+
+  res.json({ valid: !!found });
+});
 
 
 
