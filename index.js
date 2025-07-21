@@ -4,6 +4,8 @@ const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
 
+const pLimit = require('p-limit');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
@@ -415,13 +417,16 @@ app.get('/apps/referral/check-code', async (req, res) => {
       const customers = customerRes.data.customers;
       if (!customers || customers.length === 0) break;
 
-      const pLimit = require('p-limit');
-      const limit = pLimit(1); // Only 1 metafield request at a time
+      
+      const limit = pLimit(1);
+      let found = false;
 
       for (const customer of customers) {
         await limit(async () => {
+          if (found) return; // ⛔️ stop processing if already found
+
           try {
-            await new Promise(resolve => setTimeout(resolve, 800)); // Delay between requests
+            await new Promise(resolve => setTimeout(resolve, 800));
 
             const metafieldsRes = await axios.get(
               `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customer.id}/metafields.json`,
@@ -441,14 +446,19 @@ app.get('/apps/referral/check-code', async (req, res) => {
 
             if (match) {
               found = true;
-              return res.json({ valid: true, customer_id: customer.id });
+              return res.json({ valid: true, customer_id: customer.id }); // ✅ safe single response
             }
           } catch (err) {
             console.error(`Metafields error for customer ${customer.id}:`, err.message);
           }
         });
 
-        if (found) break; // Exit loop once found
+        if (found) return; // ✅ stop loop and route handler after response
+      }
+
+      // If no match was found:
+      if (!found) {
+        return res.json({ valid: false });
       }
 
 
