@@ -107,7 +107,7 @@ app.post('/webhook/customers/update', async (req, res) => {
 
     const refMatch = note.match(/ref:(\d+)/);
     if (!refMatch) return res.status(200).send('No referral code found');
-    
+
     const referrerId = refMatch[1];
 
     const referrerRes = await axios.get(
@@ -395,7 +395,7 @@ app.get('/apps/referral/check-code', async (req, res) => {
     return res.status(400).json({ valid: false, message: 'No code provided' });
   }
 
-  let found = false;
+  let foundCustomerId = null;
   let nextPageInfo = null;
 
   try {
@@ -410,17 +410,10 @@ app.get('/apps/referral/check-code', async (req, res) => {
         },
       });
 
-
       const customers = customerRes.data.customers;
       if (!customers || customers.length === 0) break;
 
-      
-  
-      let found = false;
-
-        for (const customer of customers) {
-        if (found) break; // stop early if already found
-
+      for (const customer of customers) {
         try {
           const metafieldsRes = await axios.get(
             `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customer.id}/metafields.json`,
@@ -439,33 +432,27 @@ app.get('/apps/referral/check-code', async (req, res) => {
           );
 
           if (match) {
-            found = true;
-            return res.json({ valid: true, customer_id: customer.id }); // ✅ safe single response
+            foundCustomerId = customer.id;
+            break; // exit inner loop
           }
         } catch (err) {
           console.error(`Metafields error for customer ${customer.id}:`, err.message);
         }
       }
 
-      return res.json({ valid: false });
-
-
-
-
       // Parse next page from Link header
       const linkHeader = customerRes.headers['link'];
       const matchNext = linkHeader && linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+      nextPageInfo = matchNext ? new URL(matchNext[1]).searchParams.get('page_info') : null;
 
-      if (matchNext) {
-        const url = new URL(matchNext[1]);
-        nextPageInfo = url.searchParams.get('page_info');
-      } else {
-        nextPageInfo = null;
-      }
+    } while (!foundCustomerId && nextPageInfo);
 
-    } while (!found && nextPageInfo);
+    if (foundCustomerId) {
+      return res.json({ valid: true, customer_id: foundCustomerId });
+    } else {
+      return res.json({ valid: false });
+    }
 
-    return res.json({ valid: false });
   } catch (error) {
     console.error('Error checking referral code:', error.response?.data || error.message);
     return res.status(500).json({ valid: false, error: error.message });
