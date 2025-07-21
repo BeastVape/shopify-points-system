@@ -76,25 +76,6 @@ async function ensureReferralCode(customer) {
     );
   }
 }
-/* ------------------ Helper: Find referrer by code ------------------ */
-async function getReferrerByCode(refCode, excludeId = null) {
-  const query = `metafield:referral.code=${refCode}`;
-  const url = `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/search.json?query=${encodeURIComponent(query)}`;
-
-  const res = await axios.get(url, {
-    headers: {
-      'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN
-    }
-  });
-
-  const candidates = res.data.customers || [];
-
-  // Filter out excluded ID and return the first valid referrer
-  const referrer = candidates.find(c => String(c.id) !== String(excludeId));
-
-  return referrer || null;
-}
-
 
 /* ------------------ Webhook: customers/update ------------------ */
 app.post('/webhook/customers/update', async (req, res) => {
@@ -126,14 +107,24 @@ app.post('/webhook/customers/update', async (req, res) => {
 
     const refMatch = note.match(/ref:(\d+)/);
     if (!refMatch) return res.status(200).send('No referral code found');
-    const refCode = refMatch[1];
+    
+    const referrerId = refMatch[1];
 
-    const referrer = await getReferrerByCode(refCode, customerId);
-    if (!referrer) {
-      console.warn(`⚠️ Referrer with code ${refCode} not found`);
+    const referrerRes = await axios.get(
+      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrerId}.json`,
+      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } }
+    ).catch(err => {
+      console.warn(`⚠️ Failed to fetch referrer with ID ${referrerId}:`, err.response?.data || err.message);
+      return null;
+    });
+
+    if (!referrerRes?.data?.customer) {
       return res.status(200).send('Referrer not found');
     }
 
+const referrer = referrerRes.data.customer;
+
+    
     // Fetch referrer's metafields
     const { data: meta } = await axios.get(
       `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrer.id}/metafields.json`,
@@ -312,9 +303,15 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
     // --- REFERRAL / COMMISSION LOGIC ---
     const refMatch = note.match(/ref:(\d+)/);
     if (!refMatch) return res.status(200).send('No referral found');
-    const refCode = refMatch[1];
+    const referrerId = refMatch[1];
+    const referrer = await axios.get(
+      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${referrerId}.json`,
+      {
+        headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
+      }
+    ).then(res => res.data.customer).catch(err => null);
 
-    const referrer = await getReferrerByCode(refCode, customerId);
+
     if (!referrer) return res.status(200).send('Referrer not found');
 
     const referrerTags = referrer.tags?.split(',').map(t => t.trim()) || [];
