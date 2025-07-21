@@ -82,41 +82,19 @@ async function getReferrerByCode(refCode, excludeId = null) {
   const url = `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/search.json?query=${encodeURIComponent(query)}`;
 
   const res = await axios.get(url, {
-    headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN }
+    headers: {
+      'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN
+    }
   });
 
   const candidates = res.data.customers || [];
 
-  // ⚠️ Remove this broken logic:
-  // const referrer = candidates.find(c => String(c.id) === String(refCode));
+  // Filter out excluded ID and return the first valid referrer
+  const referrer = candidates.find(c => String(c.id) !== String(excludeId));
 
-  // ✅ Instead: Match the correct customer by checking the metafield itself
-  for (const customer of candidates) {
-    if (String(customer.id) === String(excludeId)) continue;
-
-    const metafieldsRes = await axios.get(
-      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customer.id}/metafields.json`,
-      {
-        headers: {
-          'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
-        },
-      }
-    );
-
-    const match = metafieldsRes.data.metafields.find(
-      (mf) =>
-        mf.namespace === 'referral' &&
-        mf.key === 'code' &&
-        mf.value === refCode
-    );
-
-    if (match) {
-      return customer;
-    }
-  }
-
-  return null;
+  return referrer || null;
 }
+
 
 /* ------------------ Webhook: customers/update ------------------ */
 app.post('/webhook/customers/update', async (req, res) => {
