@@ -415,32 +415,43 @@ app.get('/apps/referral/check-code', async (req, res) => {
       const customers = customerRes.data.customers;
       if (!customers || customers.length === 0) break;
 
+      const pLimit = require('p-limit');
+      const limit = pLimit(1); // Only 1 metafield request at a time
+
       for (const customer of customers) {
-        try {
-          const metafieldsRes = await axios.get(
-            `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customer.id}/metafields.json`,
-            {
-              headers: {
-                'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
-              },
+        await limit(async () => {
+          try {
+            await new Promise(resolve => setTimeout(resolve, 800)); // Delay between requests
+
+            const metafieldsRes = await axios.get(
+              `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customer.id}/metafields.json`,
+              {
+                headers: {
+                  'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+                },
+              }
+            );
+
+            const match = metafieldsRes.data.metafields.find(
+              (mf) =>
+                mf.namespace === 'referral' &&
+                mf.key === 'code' &&
+                mf.value === codeToCheck
+            );
+
+            if (match) {
+              found = true;
+              return res.json({ valid: true, customer_id: customer.id });
             }
-          );
-
-          const match = metafieldsRes.data.metafields.find(
-            (mf) =>
-              mf.namespace === 'referral' &&
-              mf.key === 'code' &&
-              mf.value === codeToCheck
-          );
-
-          if (match) {
-            found = true;
-            return res.json({ valid: true, customer_id: customer.id });
+          } catch (err) {
+            console.error(`Metafields error for customer ${customer.id}:`, err.message);
           }
-        } catch (err) {
-          console.error(`Metafields error for customer ${customer.id}:`, err.message);
-        }
+        });
+
+        if (found) break; // Exit loop once found
       }
+
+
 
       // Parse next page from Link header
       const linkHeader = customerRes.headers['link'];
