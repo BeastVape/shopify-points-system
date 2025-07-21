@@ -414,6 +414,7 @@ app.get('/apps/referral/check-code', async (req, res) => {
         },
       });
 
+
       const customers = customerRes.data.customers;
       if (!customers || customers.length === 0) break;
 
@@ -436,6 +437,8 @@ app.get('/apps/referral/check-code', async (req, res) => {
                 },
               }
             );
+
+            console.log(`Customer ${customer.id} metafields:`, metafieldsRes.data.metafields);
 
             const match = metafieldsRes.data.metafields.find(
               (mf) =>
