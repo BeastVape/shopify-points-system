@@ -419,11 +419,11 @@ app.get('/apps/referral/check-code', async (req, res) => {
       if (!customers || customers.length === 0) break;
 
       
-      const limit = pLimit(1);
+  
       let found = false;
 
       for (const customer of customers) {
-        await limit(async () => {
+        await new Promise(async () => {
           if (found) return; // ⛔️ stop processing if already found
 
           try {
@@ -437,8 +437,6 @@ app.get('/apps/referral/check-code', async (req, res) => {
                 },
               }
             );
-
-            
 
             const match = metafieldsRes.data.metafields.find(
               (mf) =>
