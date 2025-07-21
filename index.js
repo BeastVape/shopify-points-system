@@ -4,7 +4,6 @@ const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
 
-const pLimit = require('p-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -88,15 +87,10 @@ async function getReferrerByCode(refCode, excludeId = null) {
 
   const candidates = res.data.customers || [];
 
-  // Only reward the one whose ID exactly matches the referral code
-  const referrer = candidates.find(c => String(c.id) === String(refCode));
-
-  if (referrer && String(referrer.id) !== String(excludeId)) {
-    return referrer;
-  }
-
-  return null;
+  // Return the first match that isn't the customer being verified
+  return candidates.find(c => String(c.id) !== String(excludeId)) || null;
 }
+
 /* ------------------ Webhook: customers/update ------------------ */
 app.post('/webhook/customers/update', async (req, res) => {
   const customerId = req.body.id;
@@ -423,44 +417,36 @@ app.get('/apps/referral/check-code', async (req, res) => {
       let found = false;
 
       for (const customer of customers) {
-        await new Promise(async () => {
-          if (found) return; // ⛔️ stop processing if already found
+        if (found) break; // stop early if already found
 
-          try {
-            await new Promise(resolve => setTimeout(resolve, 100));
-
-            const metafieldsRes = await axios.get(
-              `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customer.id}/metafields.json`,
-              {
-                headers: {
-                  'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
-                },
-              }
-            );
-
-            const match = metafieldsRes.data.metafields.find(
-              (mf) =>
-                mf.namespace === 'referral' &&
-                mf.key === 'code' &&
-                mf.value === codeToCheck
-            );
-
-            if (match) {
-              found = true;
-              return res.json({ valid: true, customer_id: customer.id }); // ✅ safe single response
+        try {
+          const metafieldsRes = await axios.get(
+            `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customer.id}/metafields.json`,
+            {
+              headers: {
+                'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+              },
             }
-          } catch (err) {
-            console.error(`Metafields error for customer ${customer.id}:`, err.message);
+          );
+
+          const match = metafieldsRes.data.metafields.find(
+            (mf) =>
+              mf.namespace === 'referral' &&
+              mf.key === 'code' &&
+              mf.value === codeToCheck
+          );
+
+          if (match) {
+            found = true;
+            return res.json({ valid: true, customer_id: customer.id }); // ✅ safe single response
           }
-        });
-
-        if (found) return; // ✅ stop loop and route handler after response
+        } catch (err) {
+          console.error(`Metafields error for customer ${customer.id}:`, err.message);
+        }
       }
 
-      // If no match was found:
-      if (!found) {
-        return res.json({ valid: false });
-      }
+      return res.json({ valid: false });
+
 
 
 
