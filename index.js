@@ -459,7 +459,143 @@ app.get('/apps/referral/check-code', async (req, res) => {
   }
 });
 
+/** ------------------ Referral Bulk Operation Setup ------------------ **/
 
+// 1. Start the bulk operation
+app.get('/apps/referral/load-bulk', async (req, res) => {
+  try {
+    const bulkQuery = `
+    {
+      customers {
+        edges {
+          node {
+            id
+            metafields(namespace: "referral", first: 10) {
+              edges {
+                node {
+                  key
+                  value
+                }
+              }
+            }
+          }
+        }
+      }
+    }`;
+
+    const mutation = {
+      query: `
+        mutation {
+          bulkOperationRunQuery(
+            query: """${bulkQuery}"""
+          ) {
+            bulkOperation {
+              id
+              status
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `,
+    };
+
+    const result = await axios.post(
+      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/graphql.json`,
+      mutation,
+      {
+        headers: {
+          'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    res.json(result.data);
+  } catch (err) {
+    console.error('Bulk load error:', err?.response?.data || err.message);
+    res.status(500).send('Failed to start bulk operation');
+  }
+});
+
+// 2. Fetch and cache the bulk result
+app.get('/apps/referral/fetch-result', async (req, res) => {
+  try {
+    const pollQuery = {
+      query: `
+        {
+          currentBulkOperation {
+            id
+            status
+            url
+            objectCount
+            errorCode
+            createdAt
+            completedAt
+          }
+        }
+      `,
+    };
+
+    const result = await axios.post(
+      `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/graphql.json`,
+      pollQuery,
+      {
+        headers: {
+          'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    const operation = result.data.data.currentBulkOperation;
+    if (operation.status !== 'COMPLETED' || !operation.url) {
+      return res.json({ status: operation.status });
+    }
+
+    const file = await axios.get(operation.url);
+    global.referralCache = file.data;
+    res.json({ status: 'Downloaded', size: file.data.length });
+  } catch (err) {
+    console.error('Fetch result error:', err?.response?.data || err.message);
+    res.status(500).send('Failed to fetch result');
+  }
+});
+
+// 3. Local code validation (from cached data)
+app.get('/apps/referral/check-code', async (req, res) => {
+  try {
+    const code = req.query.code;
+    if (!code) return res.status(400).json({ valid: false, message: 'No code provided' });
+
+    const data = global.referralCache;
+    if (!data) return res.status(503).json({ valid: false, message: 'Referral cache not loaded yet' });
+
+    const lines = data.split('\n');
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const customer = JSON.parse(line);
+      const metafields = customer?.metafields?.edges || [];
+
+      for (const mf of metafields) {
+        if (mf.node.key === 'code' && mf.node.value === code) {
+          return res.json({
+            valid: true,
+            customer_id: customer.id.replace('gid://shopify/Customer/', ''),
+          });
+        }
+      }
+    }
+
+    res.json({ valid: false });
+  } catch (err) {
+    console.error('Code check error:', err.message);
+    res.status(500).send('Referral check failed');
+  }
+});
+/** ------------------End Referral Bulk Operation Setup ------------------ **/
 
 
 
