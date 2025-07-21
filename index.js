@@ -427,7 +427,7 @@ app.get('/apps/referral/check-code', async (req, res) => {
           if (found) return; // ⛔️ stop processing if already found
 
           try {
-            await new Promise(resolve => setTimeout(resolve, 800));
+            await new Promise(resolve => setTimeout(resolve, 100));
 
             const metafieldsRes = await axios.get(
               `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/customers/${customer.id}/metafields.json`,
@@ -438,7 +438,7 @@ app.get('/apps/referral/check-code', async (req, res) => {
               }
             );
 
-            console.log(`Customer ${customer.id} metafields:`, metafieldsRes.data.metafields);
+            
 
             const match = metafieldsRes.data.metafields.find(
               (mf) =>
