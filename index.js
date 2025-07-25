@@ -388,7 +388,7 @@ app.post('/webhook/orders/fulfilled', async (req, res) => {
 
 /* ------------------ Validate the referral code ------------------ */
 // Endpoint: /apps/referral/check-code?code=123456
-app.get('/apps/referral/check-code', async (req, res) => {
+/*app.get('/apps/referral/check-code', async (req, res) => {
   const codeToCheck = req.query.code;
 
   if (!codeToCheck) {
@@ -458,6 +458,7 @@ app.get('/apps/referral/check-code', async (req, res) => {
     return res.status(500).json({ valid: false, error: error.message });
   }
 });
+*/
 
 /** ------------------ Referral Bulk Operation Setup ------------------ **/
 
