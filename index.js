@@ -495,6 +495,7 @@ app.get('/apps/referral/fetch-result', async (req, res) => {
 // 3. Local code validation (from cached data)
 app.get('/apps/referral/check-code', async (req, res) => {
   try {
+    console.log("Cached data sample:", global.referralCache?.slice(0, 500)); // 👈 this logs part of the cache
     const code = req.query.code?.trim().toLowerCase();
     if (!code) return res.status(400).json({ valid: false, message: 'No code provided' });
 
