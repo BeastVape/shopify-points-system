@@ -495,7 +495,7 @@ app.get('/apps/referral/fetch-result', async (req, res) => {
 // 3. Local code validation (from cached data)
 app.get('/apps/referral/check-code', async (req, res) => {
   try {
-    const code = req.query.code;
+    const code = req.query.code?.trim().toLowerCase();
     if (!code) return res.status(400).json({ valid: false, message: 'No code provided' });
 
     const data = global.referralCache;
@@ -508,7 +508,11 @@ app.get('/apps/referral/check-code', async (req, res) => {
       const metafields = customer?.metafields?.edges || [];
 
       for (const mf of metafields) {
-        if (mf.node.key === 'code' && mf.node.value === code) {
+        if (
+          mf.node.namespace === 'referral' &&
+          mf.node.key === 'code' &&
+          mf.node.value.trim().toLowerCase() === code
+        ) {
           return res.json({
             valid: true,
             customer_id: customer.id.replace('gid://shopify/Customer/', ''),
@@ -517,12 +521,14 @@ app.get('/apps/referral/check-code', async (req, res) => {
       }
     }
 
+    console.log('No match found for code:', code);
     res.json({ valid: false });
   } catch (err) {
     console.error('Code check error:', err.message);
     res.status(500).send('Referral check failed');
   }
 });
+
 /** ------------------End Referral Bulk Operation Setup ------------------ **/
 
 
