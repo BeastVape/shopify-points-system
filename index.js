@@ -495,8 +495,7 @@ app.get('/apps/referral/fetch-result', async (req, res) => {
 // 3. Local code validation (from cached data)
 app.get('/apps/referral/check-code', async (req, res) => {
   try {
-    console.log("Cached data sample:", global.referralCache?.slice(0, 500)); // 👈 this logs part of the cache
-    const code = req.query.code?.trim().toLowerCase();
+    const code = req.query.code;
     if (!code) return res.status(400).json({ valid: false, message: 'No code provided' });
 
     const data = global.referralCache;
@@ -505,30 +504,22 @@ app.get('/apps/referral/check-code', async (req, res) => {
     const lines = data.split('\n');
     for (const line of lines) {
       if (!line.trim()) continue;
-      const customer = JSON.parse(line);
-      const metafields = customer?.metafields?.edges || [];
+      const metafield = JSON.parse(line);
 
-      for (const mf of metafields) {
-        if (
-          mf.node.namespace === 'referral' &&
-          mf.node.key === 'code' &&
-          mf.node.value.trim().toLowerCase() === code
-        ) {
-          return res.json({
-            valid: true,
-            customer_id: customer.id.replace('gid://shopify/Customer/', ''),
-          });
-        }
+      if (metafield.key === 'code' && metafield.value === code) {
+        const customerId = metafield.__parentId.replace('gid://shopify/Customer/', '');
+        return res.json({ valid: true, customer_id: customerId });
       }
     }
 
-    console.log('No match found for code:', code);
+    console.log(`No match found for code: ${code}`);
     res.json({ valid: false });
   } catch (err) {
     console.error('Code check error:', err.message);
     res.status(500).send('Referral check failed');
   }
 });
+
 
 /** ------------------End Referral Bulk Operation Setup ------------------ **/
 
